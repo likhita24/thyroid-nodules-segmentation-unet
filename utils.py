@@ -2,8 +2,12 @@ import torch
 import torchvision
 from dataset import ThyroidDataset
 from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
+import numpy as np
+import matplotlib.image as mpimg
 
-device = "3"
+
+device = "4"
 
 def save_checkpoint(state, filename="my_checkpoint.pth.tar"):
     print("=> Saving checkpoint")
@@ -18,11 +22,12 @@ def get_loaders(
     train_maskdir,
     val_dir,
     val_maskdir,
-    # test_dir, 
-    # test_maskdir,
+    test_dir, 
+    test_maskdir,
     batch_size,
     train_transform,
     val_transform,
+    test_transform,
     num_workers=4,
     pin_memory=True,
 ):
@@ -54,43 +59,79 @@ def get_loaders(
         shuffle=False,
     )
 
-    return train_loader, val_loader
+    test_ds = ThyroidDataset(
+        image_dir=test_dir,
+        mask_dir=test_maskdir,
+        transform=test_transform,
+    )
+
+    test_loader = DataLoader(
+        test_ds,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        shuffle=True,
+    )
+
+    return train_loader, val_loader, test_loader
+
+def plot_image(tensor):
+    plt.imshow(tensor.cpu().squeeze())
+    plt.show()
 
 def check_accuracy(loader, model, device = device):
     num_correct = 0
     num_pixels = 0
     dice_score = 0
     model.eval()
-
+    predictions = []
     with torch.no_grad():
-        for x, y in loader:
+        for x, y, n in loader:
+            #print(n)
             x = x.cuda()
             y = y.cuda().unsqueeze(1)
+
             preds = torch.sigmoid(model(x))
+            #print("one :,", type(preds))
             preds = (preds > 0.5).float()
+            #print("two :,", type(preds))
             num_correct += (preds == y).sum()
             num_pixels += torch.numel(preds)
             dice_score += (2 * (preds * y).sum()) / (
                 (preds + y).sum() + 1e-8
             )
-
+            predictions.append(preds)
+            # for predicted_mask, original_height, original_width in zip(preds, h.numpy(), w.numpy()):
+            #     predictions.append((predicted_mask, original_height, original_width))
+    
     print(
         f"Got {num_correct}/{num_pixels} with acc {float(num_correct)/float(num_pixels)*100:.2f}"
     )
     print(f"Dice score: {dice_score}")
     model.train()
+    return predictions
 
-def save_predictions_as_imgs(
-    loader, model, folder="/DATA/bitra1/saved_images", device=device):
+def save_predictions_as_imgs(path, loader, model, folder="/DATA/bitra1/saved_images/", device=device):
     model.eval()
-    for idx, (x, y) in enumerate(loader):
+    print("LENGTH OF LOADER = ", len(loader))
+    print("TYPE OF LOADER = ", type(loader))
+    for idx, (x, y, img_name) in enumerate(loader):
         x = x.cuda()
+        print(img_name[0] + ".jpg")
+        new_name = img_name[0] + ".jpg"
+        img = mpimg.imread(path + img_name[0] + ".jpg")
+        imgplot = plt.imshow(img)
+        plt.show()
+        #plot_image(y)
         with torch.no_grad():
             preds = torch.sigmoid(model(x))
             preds = (preds > 0.5).float()
+            # plot_image(preds)
         torchvision.utils.save_image(
-            preds, f"{folder}/{idx}.png"
+            preds, f"{folder}/{new_name}"
         )
-        torchvision.utils.save_image(y.unsqueeze(1), f"{folder}{idx}.tif")
-
+        img = mpimg.imread(folder + new_name)
+        imgplot = plt.imshow(img)
+        plt.show()
+        #torchvision.utils.save_image(y.unsqueeze(1), f"{folder}{new_name}.tif")
     model.train()
